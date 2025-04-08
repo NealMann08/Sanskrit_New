@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "550292019140",
+    "project_id": "sanskrit-ai-d83ab",
+    "storage_bucket": "sanskrit-ai-d83ab.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:550292019140:android:f50296f1b55b1f8541f691",
+        "android_client_info": {
+          "package_name": "com.example.sanskrit_learning_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBYgZiXYsJrTe81b8XvCuJKMoop-mAOVQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
