@@ -11,70 +11,130 @@ class TranslationScreen extends StatefulWidget {
 class _TranslationScreenState extends State<TranslationScreen> {
   String exercise = "";
   String correctAnswer = "";
-  TextEditingController userResponseController = TextEditingController();
+  String userAnswer = "";
   String feedback = "";
+  bool isLoading = true; // Start in loading state
+  bool _hasInitialData = false;
 
   @override
   void initState() {
     super.initState();
-    fetchExercise();
+    _loadInitialExercise();
+  }
+
+  Future<void> _loadInitialExercise() async {
+    if (!_hasInitialData) {
+      await fetchExercise();
+      _hasInitialData = true;
+    }
   }
 
   Future<void> fetchExercise() async {
+    setState(() {
+      isLoading = true;
+      feedback = "";
+      userAnswer = "";
+    });
+
     try {
       final data = await ApiService.fetchTranslationExercise();
-      print("API Response: $data");
+      if (data.containsKey('error')) {
+        throw Exception(data['error']);
+      }
+
       setState(() {
         exercise = data['exercise'];
-        correctAnswer = data['correct_answer'];
-        feedback = "";
+        correctAnswer = data['correct_answer'].toLowerCase().trim();
       });
     } catch (e) {
-      print("Error fetching translation exercise: $e");
+      setState(() => feedback = "Error: ${e.toString()}");
+    } finally {
+      setState(() => isLoading = false);
     }
   }
 
   void checkAnswer() {
-    if (userResponseController.text.trim().toLowerCase() == correctAnswer.toLowerCase()) {
-      setState(() {
-        feedback = "✅ Correct!";
-      });
-    } else {
-      setState(() {
-        feedback = "❌ Incorrect. The correct answer is: $correctAnswer";
-      });
-    }
+    final cleanedAnswer = userAnswer.toLowerCase().trim();
+    setState(() {
+      feedback =
+          cleanedAnswer == correctAnswer
+              ? "✅ Perfect! Well done!"
+              : "❌ Incorrect. Correct answer: $correctAnswer";
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Translation Exercise')),
+      appBar: AppBar(title: const Text('Translation Exercise')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Translate this Sanskrit word:', style: TextStyle(fontSize: 18)),
-            SizedBox(height: 10),
-            Text(exercise, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            SizedBox(height: 20),
-            TextField(
-              controller: userResponseController,
-              decoration: InputDecoration(labelText: 'Enter your answer'),
-            ),
-            SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: checkAnswer,
-              child: Text('Submit'),
-            ),
-            SizedBox(height: 20),
-            Text(feedback, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: fetchExercise,
-              child: Text('Next Question'),
-            ),
+            if (isLoading)
+              const Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 20),
+                      Text('Loading first exercise...'),
+                    ],
+                  ),
+                ),
+              )
+            else
+              const Text(
+                'Translate this Sanskrit Text to English:',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            const SizedBox(height: 20),
+            isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
+                  children: [
+                    Text(exercise, style: const TextStyle(fontSize: 16)),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: TextEditingController(text: userAnswer),
+                      decoration: const InputDecoration(
+                        labelText: 'Your English translation',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) => userAnswer = value,
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        ElevatedButton(
+                          onPressed: checkAnswer,
+                          child: const Text('Submit Answer'),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          onPressed: fetchExercise,
+                          child: const Text('Next Question'),
+                        ),
+                      ],
+                    ),
+                    if (feedback.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 20),
+                        child: Text(
+                          feedback,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color:
+                                feedback.contains('✅')
+                                    ? Colors.green
+                                    : Colors.red,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
           ],
         ),
       ),

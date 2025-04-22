@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'api_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'writing_analysis.dart';
 import 'translation.dart';
 import 'img_gen.dart';
@@ -14,33 +14,34 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String? username;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  User? _user;
 
   @override
   void initState() {
     super.initState();
-    _loadUser();
-  }
-  
-  Future<void> _loadUser() async {
-    final user = await ApiService.getLoggedInUser();
-    setState(() {
-      username = user;
+    _auth.authStateChanges().listen((User? user) {
+      setState(() {
+        _user = user;
+      });
     });
   }
 
   void navigateToScreen(Widget screen) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => screen),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (context) => screen));
   }
-  
-  void _logout() async {
-    await ApiService.logout();
-    Navigator.pushReplacementNamed(context, '/login');
+
+  Future<void> _logout() async {
+    try {
+      await _auth.signOut();
+      Navigator.pushReplacementNamed(context, '/login');
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Logout failed: ${e.toString()}')));
+    }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -52,51 +53,47 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           children: [
             UserAccountsDrawerHeader(
-              accountName: Text(username ?? 'User'),
-              accountEmail: Text(username != null ? '$username@example.com' : 'user@example.com'),
+              accountName: Text(_user?.displayName ?? 'User'),
+              accountEmail: Text(_user?.email ?? 'No email'),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: Colors.white,
-                child: Icon(Icons.person, size: 40, color: Colors.deepPurple),
+                child:
+                    _user?.photoURL != null
+                        ? ClipRRect(
+                          borderRadius: BorderRadius.circular(30),
+                          child: Image.network(_user!.photoURL!),
+                        )
+                        : Icon(
+                          Icons.person,
+                          size: 40,
+                          color: Colors.deepPurple,
+                        ),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.home),
               title: const Text("Home"),
-              onTap: () {
-                Navigator.pop(context);
-              },
+              onTap: () => Navigator.pop(context),
             ),
             ListTile(
               leading: const Icon(Icons.edit),
               title: const Text("Writing Analysis"),
-              onTap: () {
-                Navigator.pop(context);
-                navigateToScreen(WritingAnalysisScreen());
-              },
+              onTap: () => _navigate(WritingAnalysisScreen()),
             ),
             ListTile(
               leading: const Icon(Icons.translate),
               title: const Text("Translation"),
-              onTap: () {
-                Navigator.pop(context);
-                navigateToScreen(TranslationScreen());
-              },
+              onTap: () => _navigate(TranslationScreen()),
             ),
             ListTile(
               leading: const Icon(Icons.image),
               title: const Text("Image Generation"),
-              onTap: () {
-                Navigator.pop(context);
-                navigateToScreen(ImageGenerationScreen());
-              },
+              onTap: () => _navigate(ImageGenerationScreen()),
             ),
             ListTile(
               leading: const Icon(Icons.text_fields),
               title: const Text("Fill-in-the-Blank"),
-              onTap: () {
-                Navigator.pop(context);
-                navigateToScreen(FillInTheBlankScreen());
-              },
+              onTap: () => _navigate(FillInTheBlankScreen()),
             ),
             const Spacer(),
             ListTile(
@@ -111,18 +108,23 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text(
-              'Welcome to Sanskrit Learning!',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            Text(
+              _user != null
+                  ? 'Welcome, ${_user!.displayName ?? _user!.email}!'
+                  : 'Welcome to Sanskrit Learning!',
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
-              onPressed: () => navigateToScreen(WritingAnalysisScreen()),
+              onPressed: () => _navigate(WritingAnalysisScreen()),
               icon: const Icon(Icons.play_arrow),
               label: const Text("Start Learning"),
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -132,5 +134,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _navigate(Widget screen) {
+    Navigator.pop(context);
+    navigateToScreen(screen);
   }
 }
