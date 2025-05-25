@@ -3,19 +3,24 @@ from flask import request
 import random
 from firebase_admin import firestore
 from typing import Dict, List, Optional
+from firebase_utils import get_or_create_user, firestore_client
+import logging
+import json
 
+# Initialize logging
+logger = logging.getLogger(__name__)
 
 def generate_fill_in_the_blank(
     client: OpenAI,
-    firestore_client: firestore.Client,
-    used_sentences: Optional[List[str]] = None,
+    user_id: str,
 ) -> Dict:
     """
     Generates a Sanskrit fill-in-the-blank exercise with multiple choice options.
+    Tracks used sentences in Firestore to prevent repetition.
 
     Args:
         client: OpenAI client instance
-        used_sentences: List of previously used sentences (optional)
+        user_id: Firebase user ID for tracking progress
 
     Returns:
         Dictionary containing:
@@ -24,125 +29,88 @@ def generate_fill_in_the_blank(
         - correct_answer: The correct answer number
     """
     try:
-        # Get used sentences from authenticated user or parameter
-        user_id = request.uid if hasattr(request, "uid") else None
-
-        # Format used sentences string
-        if user_id:
-            user_ref = firestore_client.collection("users").document(user_id)
-            user_doc = user_ref.get()
-
-            if not user_doc.exists:
-                user_ref.set(
-                    {
-                        "used_sentences": [],
-                        "created_at": firestore.SERVER_TIMESTAMP,
-                        "last_active": firestore.SERVER_TIMESTAMP,
-                    }
-                )
-
-        else:
-            used_sentences = used_sentences or []
+        # Get user document reference
+        user_ref = firestore_client.collection("users").document(user_id)
+        
+        # Transactionally get/create user document
+        user_doc = get_or_create_user(user_ref)
+        if not user_doc:
+            logger.error("Failed to get/create user document")
+            return {"error": "Failed to access user data"}
+            
+        # Get the document data and safely access used_sentences
+        user_data = user_doc.to_dict()
+        used_sentences = user_data.get('used_sentences', []) if user_data else []
+        
+        # Format used sentences for the prompt
+        used_sentences_str = ", ".join([f'"{s}"' for s in used_sentences]) if used_sentences else "none"
 
         # Generate exercise
-        exercise_completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a Sanskrit teacher."},
-                {
-                    "role": "user",
-                    "content": f"""Generate one beginner-level fill-in-the-blank Sanskrit exercise.
-                            The exercise should not be any of the following sentences: [{used_sentences}].
-                            Do not provide the English translation at all.
-                            Use this structure and replace the [Verb] or [Verb] with a blank:
-                            Sentence: [Subject] + [Verb] + [Object]
-                            Answer choices:
-                            1. [Option 1]
-                            2. [Option 2]
-                            3. [Option 3]
-                            Correct answer: [Correct option]
-                            """,
-                },
-            ],
-            temperature=1.2,
+        prompt = (
+            "Generate one beginner-level fill-in-the-blank Sanskrit exercise.\n"
+            f"Previously used sentences: {used_sentences_str}\n"
+            "Do not use any of the previously used sentences.\n"
+            "Do not provide the English translation at all.\n"
+            "Use this structure and replace the [Verb] with a blank:\n"
+            "Sentence: [Subject] + [Verb] + [Object]\n\n"
+            "Return the response in this exact JSON format:\n"
+            "{\n"
+            '    "sentence": "Full Sanskrit sentence with ___ for blank",\n'
+            '    "options": ["option1", "option2", "option3"],\n'
+            '    "correct_option": 1\n'
+            "}"
         )
 
-        # Format exercise
-        exercise_response = exercise_completion.choices[0].message.content
-        formatted_completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+        exercise_completion = client.chat.completions.create(
+            model="gpt-4-0125-preview",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a Sanskrit teacher. Format responses cleanly.",
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-                                Use this Sanskrit fill-in-the-blank exercise: {exercise_response}
-                                Format as:
-                                <EXERCISE>
-                                Instructions: Identify which option best completes this sentence:
-                                Sanskrit Sentence: [Sentence with ___ for blank]
-                                Options:
-                                # 1. [Option 1]
-                                # 2. [Option 2]
-                                # 3. [Option 3]
-                                </EXERCISE>
-                                <ANSWER>
-                                [Correct Option Number]
-                                </ANSWER>
-                                """,
-                },
+                {"role": "system", "content": "You are a Sanskrit teacher. Generate exercises in JSON format."},
+                {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
+            temperature=1.2,
+            response_format={"type": "json_object"},
         )
 
         # Parse the response
-        response_text = formatted_completion.choices[0].message.content
-        exercise = response_text.split("<EXERCISE>")[1].split("</EXERCISE>")[0].strip()
-        correct_answer = (
-            response_text.split("<ANSWER>")[1].split("</ANSWER>")[0].strip()
-        )
-
-        # Process options
-        options = exercise.split("Options:")[1].strip().split("\n")
-        options = [
-            option.strip().split(". ", 1)[1] for option in options if ". " in option
-        ]
-
-        # Get correct answer text and number
-        correct_answer_num = int(correct_answer)
-        correct_answer_text = options[correct_answer_num - 1]
+        try:
+            data = json.loads(exercise_completion.choices[0].message.content)
+            sentence = data["sentence"].strip()
+            options = data["options"]
+            correct_answer = data["correct_option"]
+            
+            if sentence in used_sentences:
+                logger.warning(f"AI generated duplicate sentence: {sentence}")
+                return {"error": "Generated sentence already exists, please try again"}
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Response parsing error: {str(e)}")
+            return {"error": "Failed to process AI response"}
 
         # Randomize options while tracking correct answer
-        original_index = options.index(correct_answer_text)
+        correct_answer_text = options[correct_answer - 1]
         random.shuffle(options)
         new_correct_index = options.index(correct_answer_text) + 1
 
-        # Rebuild exercise with randomized options
+        # Format the exercise
         formatted_options = "\n".join(
             [f"# {i + 1}. {options[i]}" for i in range(len(options))]
         )
-        exercise = exercise.split("Options:")[0] + f"Options:\n{formatted_options}"
+        exercise = f"Instructions: Identify which option best completes this sentence:\nSanskrit Sentence: {sentence}\nOptions:\n{formatted_options}"
 
-        # Update user's used sentences if authenticated
-        if user_id:
-            user_ref.update(
-                {
-                    "used_sentences": firestore.ArrayUnion([exercise]),
-                    "last_active": firestore.SERVER_TIMESTAMP,
-                }
-            )
+        # Transactionally update user document
+        try:
+            @firestore.transactional
+            def update_transaction(transaction):
+                transaction.update(user_ref, {
+                    "used_sentences": firestore.ArrayUnion([sentence]),
+                    "fill_in_blank_exercises": firestore.Increment(1),
+                    "last_active": firestore.SERVER_TIMESTAMP
+                })
 
-            firestore_client.collection("exercises").add(
-                {
-                    "user_id": user_id,
-                    "type": "fill_in_the_blank",
-                    "content": exercise,
-                    "created_at": firestore.SERVER_TIMESTAMP,
-                }
-            )
+            update_transaction(firestore_client.transaction())
+        except Exception as e:
+            logger.error(f"Firestore transaction error: {str(e)}")
+            return {"error": "Failed to update user progress"}
 
         return {
             "exercise": exercise,
@@ -151,6 +119,7 @@ def generate_fill_in_the_blank(
         }
 
     except Exception as e:
+        logger.error(f"Error generating exercise: {str(e)}", exc_info=True)
         return {
             "error": f"Error generating exercise: {str(e)}",
             "exercise": "",

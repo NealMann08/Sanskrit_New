@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class ApiService {
   static const String baseUrl =
-      "http://127.0.0.1:5000"; // Your Flask backend URL
+      "http://localhost:5000"; // Your Flask backend URL
   static final http.Client client = http.Client();
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -31,7 +31,7 @@ class ApiService {
   // Fetch Fill-in-the-Blank Exercise
   static Future<Map<String, dynamic>> fetchFillInTheBlank() async {
     try {
-      final response = await client.get(
+      final response = await http.get(
         Uri.parse('$baseUrl/fill-in-the-blank'),
         headers: await _authHeaders(),
       );
@@ -63,7 +63,7 @@ class ApiService {
     String prompt,
   ) async {
     try {
-      final response = await client.post(
+      final response = await http.post(
         Uri.parse('$baseUrl/generate-image'),
         headers: await _authHeaders(),
         body: jsonEncode({"prompt": prompt}),
@@ -81,7 +81,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> analyzeSanskritText(String text) async {
     try {
-      final response = await client.post(
+      final response = await http.post(
         Uri.parse('$baseUrl/analyze-text'),
         headers: await _authHeaders(),
         body: jsonEncode({'text': text}),
@@ -96,7 +96,7 @@ class ApiService {
     String base64Image,
   ) async {
     try {
-      final response = await client.post(
+      final response = await http.post(
         Uri.parse('$baseUrl/analyze-image'),
         headers: await _authHeaders(),
         body: jsonEncode({'image_base64': base64Image}),
@@ -118,18 +118,52 @@ class ApiService {
   // Fetch Translation Exercise
   static Future<Map<String, dynamic>> fetchTranslationExercise() async {
     try {
-      final response = await client.get(
+      final response = await http.get(
         Uri.parse('$baseUrl/translation-exercise'),
         headers: await _authHeaders(),
       );
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final data = jsonDecode(response.body);
+        if (data.containsKey('error')) {
+          return {
+            'error': data['error'],
+            'exercise': 'Could not generate exercise',
+            'correct_answers': <String>[],
+            'example': '',
+          };
+        }
+        return {
+          'exercise': data['exercise'] ?? 'Could not generate exercise',
+          'correct_answers': List<String>.from(data['correct_answers'] ?? []),
+          'example': data['example'] ?? '',
+        };
       } else {
-        throw "Server error: ${response.statusCode}";
+        final error =
+            _tryParseError(response) ?? 'Server error: ${response.statusCode}';
+        return {
+          'error': error,
+          'exercise': 'Could not generate exercise',
+          'correct_answers': <String>[],
+          'example': '',
+        };
       }
     } catch (e) {
-      return {'error': e.toString()};
+      return {
+        'error': e.toString(),
+        'exercise': 'Service unavailable',
+        'correct_answers': <String>[],
+        'example': '',
+      };
+    }
+  }
+
+  static String? _tryParseError(http.Response response) {
+    try {
+      final body = jsonDecode(response.body);
+      return body['error'] ?? null;
+    } catch (_) {
+      return null;
     }
   }
 

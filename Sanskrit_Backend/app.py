@@ -2,29 +2,37 @@ from flask import Flask, request, jsonify, Response
 from fill_in_the_blank import generate_fill_in_the_blank
 from image_generation import generate_image
 from writing_analysis import analyze_sanskrit_image, analyze_sanskrit_text
-from translation import generate_translation_exercise
+from translation import generate_translation_exercise  # Now safe to import
 from flask_cors import CORS
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-import firebase_admin
-from firebase_admin import credentials, auth, firestore
+from firebase_admin import auth
 from functools import wraps
+from firebase_utils import firestore_client
+import logging
+
 
 # Load environment variables
 load_dotenv()
 
+
 # Initialize Flask
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    supports_credentials=True,
+    origins=["http://localhost:*"],  # Allow all localhost ports
+    methods=["GET", "POST"]
+)
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Initialize Firebase Admin
-cred = credentials.Certificate("config/firebase-service-account.json")
-firebase_admin.initialize_app(cred)
-firestore_client = firestore.client()
 
 # Initialize OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 # Firebase Auth verification decorator
 def firebase_authenticated(f):
@@ -47,15 +55,16 @@ def firebase_authenticated(f):
             
         return f(*args, **kwargs)
     return decorated_function
-
+    
 # Protected endpoints
 @app.route('/fill-in-the-blank', methods=['GET'])
 @firebase_authenticated
 def fill_in_the_blank():
     try:
-        result = generate_fill_in_the_blank(client, firestore_client, request.uid)
+        result = generate_fill_in_the_blank(client=client, user_id=request.uid)
         return jsonify(result)
     except Exception as e:
+        logger.error(f"Endpoint error: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/generate-image', methods=['POST'])
@@ -74,17 +83,17 @@ def image_generation():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/translation-exercise', methods=['GET'])
-@firebase_authenticated  # Add authentication decorator
+@firebase_authenticated
 def translation_exercise():
     try:
+        # Remove explicit firestore_client parameter
         exercise = generate_translation_exercise(
-            client=client,
-            user_id=request.uid,  # Get UID from authenticated request
-            firestore_client=firestore_client
-        )
+            client=client, 
+            user_id=request.uid)
         return jsonify(exercise)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Endpoint error: {str(e)}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 # Text Analysis Endpoint
 @app.route('/analyze-text', methods=['POST'])

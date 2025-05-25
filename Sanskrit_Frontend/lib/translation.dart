@@ -10,16 +10,23 @@ class TranslationScreen extends StatefulWidget {
 
 class _TranslationScreenState extends State<TranslationScreen> {
   String exercise = "";
-  String correctAnswer = "";
+  List<String> correctAnswers = [];
   String userAnswer = "";
   String feedback = "";
-  bool isLoading = true; // Start in loading state
+  bool isLoading = true;
   bool _hasInitialData = false;
+  final TextEditingController _textController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadInitialExercise();
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadInitialExercise() async {
@@ -34,6 +41,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
       isLoading = true;
       feedback = "";
       userAnswer = "";
+      _textController.clear();
     });
 
     try {
@@ -43,8 +51,8 @@ class _TranslationScreenState extends State<TranslationScreen> {
       }
 
       setState(() {
-        exercise = data['exercise'];
-        correctAnswer = data['correct_answer'].toLowerCase().trim();
+        exercise = data['exercise'] ?? '';
+        correctAnswers = List<String>.from(data['correct_answers'] ?? []);
       });
     } catch (e) {
       setState(() => feedback = "Error: ${e.toString()}");
@@ -54,12 +62,23 @@ class _TranslationScreenState extends State<TranslationScreen> {
   }
 
   void checkAnswer() {
-    final cleanedAnswer = userAnswer.toLowerCase().trim();
+    // Safely handle null or empty values
+    if (userAnswer.isEmpty) {
+      setState(() {
+        feedback = "❌ Please enter a translation";
+      });
+      return;
+    }
+
+    final cleanedAnswer = userAnswer.trim().toLowerCase();
     setState(() {
-      feedback =
-          cleanedAnswer == correctAnswer
-              ? "✅ Perfect! Well done!"
-              : "❌ Incorrect. Correct answer: $correctAnswer";
+      if (correctAnswers.contains(cleanedAnswer)) {
+        feedback = "✅ Perfect! Well done!";
+      } else {
+        // Format multiple correct answers nicely
+        final formattedAnswers = correctAnswers.join(' or ');
+        feedback = "❌ Incorrect. Acceptable answers: $formattedAnswers";
+      }
     });
   }
 
@@ -72,7 +91,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (isLoading)
+            if (isLoading && !_hasInitialData)
               const Expanded(
                 child: Center(
                   child: Column(
@@ -92,13 +111,21 @@ class _TranslationScreenState extends State<TranslationScreen> {
               ),
             const SizedBox(height: 20),
             isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 10),
+                      Text('Loading next question...'),
+                    ],
+                  ),
+                )
                 : Column(
                   children: [
                     Text(exercise, style: const TextStyle(fontSize: 16)),
                     const SizedBox(height: 20),
                     TextField(
-                      controller: TextEditingController(text: userAnswer),
+                      controller: _textController,
                       decoration: const InputDecoration(
                         labelText: 'Your English translation',
                         border: OutlineInputBorder(),

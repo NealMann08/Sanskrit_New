@@ -18,7 +18,7 @@ class _WritingAnalysisScreenState extends State<WritingAnalysisScreen> {
   String feedback = "";
   bool isLoading = false;
   bool _useImageInput = false; // Toggle between text/image
-  bool _currentUseImageInput = false;
+  final bool _currentUseImageInput = false;
 
   Future<void> _pickImage() async {
     final pickedFile = await ImagePicker().pickImage(
